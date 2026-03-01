@@ -92,7 +92,7 @@
         },
       };
 
-      const defaultBasemap = 'carto-light';
+      const defaultBasemap = 'carto-dark';
 
       const map = new maplibregl.Map({
         container: 'map',
@@ -141,27 +141,47 @@
         return forward < reversed ? forward : reversed;
       }
 
-      function geometrySignature(geometry) {
-        if (!geometry || geometry.type !== 'MultiLineString') return '';
-        return geometry.coordinates
-          .map(normalizeLineCoordinates)
-          .sort()
-          .join('||');
+      function normalizeSegmentCoordinates(a, b) {
+        const start = [Number(a[0]).toFixed(6), Number(a[1]).toFixed(6)].join(',');
+        const end = [Number(b[0]).toFixed(6), Number(b[1]).toFixed(6)].join(',');
+        return start < end ? `${start}|${end}` : `${end}|${start}`;
       }
 
       function buildParallelizedGeoJSON(geojson) {
-        const groups = new Map();
+        const segmentGroups = new Map();
 
         (geojson.features || []).forEach((feature, idx) => {
-          const signature = geometrySignature(feature.geometry);
-          const key = signature || `unique-${idx}`;
-          const items = groups.get(key) || [];
-          items.push(feature);
-          groups.set(key, items);
+          const props = feature.properties || {};
+          const routeKey = String(props.route_id || props.system_name || `route-${idx}`);
+
+          const lineParts = feature.geometry?.type === 'MultiLineString'
+            ? feature.geometry.coordinates
+            : feature.geometry?.type === 'LineString'
+              ? [feature.geometry.coordinates]
+              : [];
+
+          lineParts.forEach((part) => {
+            for (let i = 0; i < part.length - 1; i += 1) {
+              const start = part[i];
+              const end = part[i + 1];
+              const segmentKey = normalizeSegmentCoordinates(start, end);
+              const items = segmentGroups.get(segmentKey) || [];
+              items.push({
+                type: 'Feature',
+                geometry: { type: 'LineString', coordinates: [start, end] },
+                properties: {
+                  ...props,
+                  route_key: routeKey,
+                },
+              });
+              segmentGroups.set(segmentKey, items);
+            }
+          });
         });
 
         const features = [];
-        for (const items of groups.values()) {
+        for (const items of segmentGroups.values()) {
+          items.sort((a, b) => String(a.properties.route_key).localeCompare(String(b.properties.route_key)));
           const overlapCount = items.length;
           items.forEach((feature, index) => {
             features.push({
@@ -200,10 +220,10 @@
             },
             paint: {
               'line-color': '#ffffff',
-              'line-width': 6,
+              'line-width': 5.5,
               'line-offset': [
                 '*',
-                2.5,
+                3,
                 [
                   '-',
                   ['get', 'overlap_index'],
@@ -230,10 +250,10 @@
                 '赤字', '#e11d48',
                 '#6b7280',
               ],
-              'line-width': 4,
+              'line-width': 3.5,
               'line-offset': [
                 '*',
-                2.5,
+                3,
                 [
                   '-',
                   ['get', 'overlap_index'],
@@ -241,6 +261,31 @@
                 ],
               ],
               'line-opacity': 0.9,
+            },
+          });
+
+          map.addLayer({
+            id: 'route-lines-hover',
+            type: 'line',
+            source: 'routes',
+            layout: {
+              'line-cap': 'round',
+              'line-join': 'round',
+            },
+            filter: ['==', ['get', 'route_key'], ''],
+            paint: {
+              'line-color': '#f59e0b',
+              'line-width': 7,
+              'line-offset': [
+                '*',
+                3,
+                [
+                  '-',
+                  ['get', 'overlap_index'],
+                  ['/', ['-', ['get', 'overlap_count'], 1], 2],
+                ],
+              ],
+              'line-opacity': 1,
             },
           });
 
@@ -255,13 +300,21 @@
             map.fitBounds(bounds, { padding: 28, duration: 0 });
           }
 
-          const popup = new maplibregl.Popup({ closeButton: true, closeOnClick: true });
+          const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 14 });
+          let hoveredRouteKey = '';
 
-          map.on('click', 'route-lines', (e) => {
+          function updateHoveredRoute(routeKey) {
+            if (hoveredRouteKey === routeKey) return;
+            hoveredRouteKey = routeKey;
+            map.setFilter('route-lines-hover', ['==', ['get', 'route_key'], hoveredRouteKey]);
+          }
+
+          map.on('mousemove', 'route-lines', (e) => {
             const feature = e.features?.[0];
             if (!feature) return;
             const p = feature.properties || {};
             const profitValue = p.profit == null ? '' : ` (${Number(p.profit).toLocaleString()} 千円)`;
+            updateHoveredRoute(String(p.route_key || ''));
 
             popup
               .setLngLat(e.lngLat)
@@ -281,7 +334,9 @@
             map.getCanvas().style.cursor = 'pointer';
           });
           map.on('mouseleave', 'route-lines', () => {
+            updateHoveredRoute('');
             map.getCanvas().style.cursor = '';
+            popup.remove();
           });
         } catch (err) {
           console.error(err);
