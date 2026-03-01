@@ -309,9 +309,27 @@
             map.setFilter('route-lines-hover', ['==', ['get', 'route_key'], hoveredRouteKey]);
           }
 
-          map.on('mousemove', 'route-lines', (e) => {
-            const feature = e.features?.[0];
-            if (!feature) return;
+          let rafId = null;
+          let pendingEvent = null;
+
+          function clearHoverState() {
+            updateHoveredRoute('');
+            map.getCanvas().style.cursor = '';
+            popup.remove();
+          }
+
+          function processPointerMove() {
+            rafId = null;
+            const e = pendingEvent;
+            if (!e) return;
+
+            const feature = map.queryRenderedFeatures(e.point, { layers: ['route-lines'] })[0];
+            if (!feature) {
+              clearHoverState();
+              return;
+            }
+
+            map.getCanvas().style.cursor = 'pointer';
             const p = feature.properties || {};
             const profitValue = p.profit == null ? '' : ` (${Number(p.profit).toLocaleString()} 千円)`;
             updateHoveredRoute(String(p.route_key || ''));
@@ -328,15 +346,21 @@
                 </div>
               `)
               .addTo(map);
+          }
+
+          map.on('mousemove', (e) => {
+            pendingEvent = e;
+            if (rafId !== null) return;
+            rafId = requestAnimationFrame(processPointerMove);
           });
 
-          map.on('mouseenter', 'route-lines', () => {
-            map.getCanvas().style.cursor = 'pointer';
-          });
-          map.on('mouseleave', 'route-lines', () => {
-            updateHoveredRoute('');
-            map.getCanvas().style.cursor = '';
-            popup.remove();
+          map.on('mouseleave', () => {
+            pendingEvent = null;
+            if (rafId !== null) {
+              cancelAnimationFrame(rafId);
+              rafId = null;
+            }
+            clearHoverState();
           });
         } catch (err) {
           console.error(err);
