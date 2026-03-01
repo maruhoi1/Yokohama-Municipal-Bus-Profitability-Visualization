@@ -25,7 +25,7 @@
         border-radius: 10px;
         box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
         padding: 10px 12px;
-        min-width: 240px;
+        min-width: 260px;
       }
       .legend-row {
         display: flex;
@@ -39,12 +39,33 @@
         border-radius: 999px;
       }
       .popup-body { font-size: 12px; line-height: 1.6; }
+      .basemap-switcher {
+        margin-top: 8px;
+        font-size: 12px;
+        color: #374151;
+      }
+      .basemap-select {
+        margin-top: 2px;
+        width: 100%;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        padding: 4px 6px;
+        background: #fff;
+      }
     </style>
   </head>
   <body>
     <div class="panel">
       <div><strong>横浜市営バス 収支可視化</strong></div>
       <div style="font-size: 12px; color: #4b5563; margin-top: 4px;">MapLibre GL JS + GeoJSON</div>
+      <label class="basemap-switcher">
+        背景地図
+        <select id="basemap-select" class="basemap-select">
+          <option value="carto-light">白地図（見やすい）</option>
+          <option value="carto-dark">ダーク</option>
+          <option value="osm">OpenStreetMap 標準</option>
+        </select>
+      </label>
       <div class="legend-row"><span class="swatch" style="background:#0b65c2"></span>黒字</div>
       <div class="legend-row"><span class="swatch" style="background:#e11d48"></span>赤字</div>
       <div class="legend-row"><span class="swatch" style="background:#6b7280"></span>未マッチ</div>
@@ -53,20 +74,46 @@
 
     <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
     <script>
+      const BASEMAPS = {
+        osm: {
+          tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+          attribution:
+            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        },
+        'carto-light': {
+          tiles: ['https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png'],
+          attribution:
+            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+        },
+        'carto-dark': {
+          tiles: ['https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'],
+          attribution:
+            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+        },
+      };
+
+      const defaultBasemap = 'carto-light';
+
       const map = new maplibregl.Map({
         container: 'map',
         style: {
           version: 8,
-          sources: {
-            osm: {
+          sources: Object.fromEntries(
+            Object.entries(BASEMAPS).map(([id, config]) => [id, {
               type: 'raster',
-              tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+              tiles: config.tiles,
               tileSize: 256,
-              attribution:
-                '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+              attribution: config.attribution,
+            }]),
+          ),
+          layers: Object.keys(BASEMAPS).map((id) => ({
+            id: `basemap-${id}`,
+            type: 'raster',
+            source: id,
+            layout: {
+              visibility: id === defaultBasemap ? 'visible' : 'none',
             },
-          },
-          layers: [{ id: 'osm', type: 'raster', source: 'osm' }],
+          })),
         },
         center: [139.638, 35.4437],
         zoom: 11.5,
@@ -74,18 +121,107 @@
 
       map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
 
+      function setBasemapVisibility(selectedId) {
+        Object.keys(BASEMAPS).forEach((id) => {
+          map.setLayoutProperty(
+            `basemap-${id}`,
+            'visibility',
+            id === selectedId ? 'visible' : 'none',
+          );
+        });
+      }
+
+      function normalizeLineCoordinates(coords) {
+        const rounded = coords.map(([lng, lat]) => [
+          Number(lng).toFixed(6),
+          Number(lat).toFixed(6),
+        ]);
+        const forward = rounded.map((p) => p.join(',')).join('|');
+        const reversed = [...rounded].reverse().map((p) => p.join(',')).join('|');
+        return forward < reversed ? forward : reversed;
+      }
+
+      function geometrySignature(geometry) {
+        if (!geometry || geometry.type !== 'MultiLineString') return '';
+        return geometry.coordinates
+          .map(normalizeLineCoordinates)
+          .sort()
+          .join('||');
+      }
+
+      function buildParallelizedGeoJSON(geojson) {
+        const groups = new Map();
+
+        (geojson.features || []).forEach((feature, idx) => {
+          const signature = geometrySignature(feature.geometry);
+          const key = signature || `unique-${idx}`;
+          const items = groups.get(key) || [];
+          items.push(feature);
+          groups.set(key, items);
+        });
+
+        const features = [];
+        for (const items of groups.values()) {
+          const overlapCount = items.length;
+          items.forEach((feature, index) => {
+            features.push({
+              ...feature,
+              properties: {
+                ...(feature.properties || {}),
+                overlap_count: overlapCount,
+                overlap_index: index,
+              },
+            });
+          });
+        }
+
+        return {
+          type: 'FeatureCollection',
+          features,
+        };
+      }
+
       async function initRouteLayer() {
         try {
           const res = await fetch('./data/routes_2024.geojson');
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const geojson = await res.json();
+          const parallelizedGeojson = buildParallelizedGeoJSON(geojson);
 
-          map.addSource('routes', { type: 'geojson', data: geojson });
+          map.addSource('routes', { type: 'geojson', data: parallelizedGeojson });
+
+          map.addLayer({
+            id: 'route-lines-casing',
+            type: 'line',
+            source: 'routes',
+            layout: {
+              'line-cap': 'round',
+              'line-join': 'round',
+            },
+            paint: {
+              'line-color': '#ffffff',
+              'line-width': 6,
+              'line-offset': [
+                '*',
+                2.5,
+                [
+                  '-',
+                  ['get', 'overlap_index'],
+                  ['/', ['-', ['get', 'overlap_count'], 1], 2],
+                ],
+              ],
+              'line-opacity': 0.95,
+            },
+          });
 
           map.addLayer({
             id: 'route-lines',
             type: 'line',
             source: 'routes',
+            layout: {
+              'line-cap': 'round',
+              'line-join': 'round',
+            },
             paint: {
               'line-color': [
                 'match',
@@ -94,8 +230,17 @@
                 '赤字', '#e11d48',
                 '#6b7280',
               ],
-              'line-width': 3,
-              'line-opacity': 0.85,
+              'line-width': 4,
+              'line-offset': [
+                '*',
+                2.5,
+                [
+                  '-',
+                  ['get', 'overlap_index'],
+                  ['/', ['-', ['get', 'overlap_count'], 1], 2],
+                ],
+              ],
+              'line-opacity': 0.9,
             },
           });
 
@@ -144,7 +289,15 @@
         }
       }
 
-      map.on('load', initRouteLayer);
+      map.on('load', () => {
+        initRouteLayer();
+
+        const basemapSelect = document.getElementById('basemap-select');
+        basemapSelect.value = defaultBasemap;
+        basemapSelect.addEventListener('change', (e) => {
+          setBasemapVisibility(e.target.value);
+        });
+      });
     </script>
   </body>
 </html>
