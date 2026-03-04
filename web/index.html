@@ -165,16 +165,6 @@
         });
       }
 
-      function normalizeLineCoordinates(coords) {
-        const rounded = coords.map(([lng, lat]) => [
-          Number(lng).toFixed(6),
-          Number(lat).toFixed(6),
-        ]);
-        const forward = rounded.map((p) => p.join(',')).join('|');
-        const reversed = [...rounded].reverse().map((p) => p.join(',')).join('|');
-        return forward < reversed ? forward : reversed;
-      }
-
       function normalizeSegmentCoordinates(a, b) {
         const start = [Number(a[0]).toFixed(6), Number(a[1]).toFixed(6)].join(',');
         const end = [Number(b[0]).toFixed(6), Number(b[1]).toFixed(6)].join(',');
@@ -182,11 +172,15 @@
       }
 
       function buildParallelizedGeoJSON(geojson) {
-        const segmentGroups = new Map();
+        const routeSegments = new Map();
+        const routeFeatures = new Map();
+        const segmentRoutes = new Map();
 
         (geojson.features || []).forEach((feature, idx) => {
           const props = feature.properties || {};
           const routeKey = String(props.route_id || props.system_name || `route-${idx}`);
+          const segments = routeSegments.get(routeKey) || new Set();
+          const features = routeFeatures.get(routeKey) || [];
 
           const lineParts = feature.geometry?.type === 'MultiLineString'
             ? feature.geometry.coordinates
@@ -199,31 +193,93 @@
               const start = part[i];
               const end = part[i + 1];
               const segmentKey = normalizeSegmentCoordinates(start, end);
-              const items = segmentGroups.get(segmentKey) || [];
-              items.push({
-                type: 'Feature',
-                geometry: { type: 'LineString', coordinates: [start, end] },
-                properties: {
-                  ...props,
-                  route_key: routeKey,
-                },
-              });
-              segmentGroups.set(segmentKey, items);
+              segments.add(segmentKey);
+
+              const segmentRouteKeys = segmentRoutes.get(segmentKey) || new Set();
+              segmentRouteKeys.add(routeKey);
+              segmentRoutes.set(segmentKey, segmentRouteKeys);
             }
           });
+
+          features.push(feature);
+          routeSegments.set(routeKey, segments);
+          routeFeatures.set(routeKey, features);
         });
 
+        const adjacency = new Map();
+        for (const routeKey of routeFeatures.keys()) {
+          adjacency.set(routeKey, new Set());
+        }
+
+        for (const routeKeys of segmentRoutes.values()) {
+          const routes = [...routeKeys];
+          for (let i = 0; i < routes.length; i += 1) {
+            for (let j = i + 1; j < routes.length; j += 1) {
+              adjacency.get(routes[i]).add(routes[j]);
+              adjacency.get(routes[j]).add(routes[i]);
+            }
+          }
+        }
+
+        const routeStyle = new Map();
+        const visited = new Set();
+
+        for (const startKey of adjacency.keys()) {
+          if (visited.has(startKey)) continue;
+
+          const queue = [startKey];
+          const component = [];
+          visited.add(startKey);
+
+          while (queue.length > 0) {
+            const key = queue.shift();
+            component.push(key);
+            for (const next of adjacency.get(key)) {
+              if (!visited.has(next)) {
+                visited.add(next);
+                queue.push(next);
+              }
+            }
+          }
+
+          component.sort((a, b) => {
+            const degreeDiff = adjacency.get(b).size - adjacency.get(a).size;
+            return degreeDiff !== 0 ? degreeDiff : a.localeCompare(b);
+          });
+
+          const colorByRoute = new Map();
+          let maxColor = 0;
+
+          component.forEach((routeKey) => {
+            const used = new Set();
+            for (const neighbor of adjacency.get(routeKey)) {
+              if (colorByRoute.has(neighbor)) used.add(colorByRoute.get(neighbor));
+            }
+
+            let color = 0;
+            while (used.has(color)) color += 1;
+            colorByRoute.set(routeKey, color);
+            maxColor = Math.max(maxColor, color);
+          });
+
+          const laneCount = maxColor + 1;
+          component.forEach((routeKey) => {
+            const laneIndex = colorByRoute.get(routeKey) - (laneCount - 1) / 2;
+            routeStyle.set(routeKey, { laneIndex, laneCount });
+          });
+        }
+
         const features = [];
-        for (const items of segmentGroups.values()) {
-          items.sort((a, b) => String(a.properties.route_key).localeCompare(String(b.properties.route_key)));
-          const overlapCount = items.length;
-          items.forEach((feature, index) => {
+        for (const [routeKey, routeFeatureList] of routeFeatures.entries()) {
+          const style = routeStyle.get(routeKey) || { laneIndex: 0, laneCount: 1 };
+          routeFeatureList.forEach((feature) => {
             features.push({
               ...feature,
               properties: {
                 ...(feature.properties || {}),
-                overlap_count: overlapCount,
-                overlap_index: index,
+                route_key: routeKey,
+                overlap_count: style.laneCount,
+                overlap_index: style.laneIndex,
               },
             });
           });
@@ -254,15 +310,11 @@
             },
             paint: {
               'line-color': '#ffffff',
-              'line-width': 5,
+              'line-width': 13,
               'line-offset': [
                 '*',
-                6,
-                [
-                  '-',
-                  ['get', 'overlap_index'],
-                  ['/', ['-', ['get', 'overlap_count'], 1], 2],
-                ],
+                10,
+                ['get', 'overlap_index'],
               ],
               'line-opacity': 0.95,
             },
@@ -284,15 +336,11 @@
                 '赤字', '#e11d48',
                 '#6b7280',
               ],
-              'line-width': 3,
+              'line-width': 9,
               'line-offset': [
                 '*',
-                6,
-                [
-                  '-',
-                  ['get', 'overlap_index'],
-                  ['/', ['-', ['get', 'overlap_count'], 1], 2],
-                ],
+                10,
+                ['get', 'overlap_index'],
               ],
               'line-opacity': 0.9,
             },
@@ -301,8 +349,12 @@
 
           const bounds = new maplibregl.LngLatBounds();
           for (const f of geojson.features) {
-            const coords = f.geometry.coordinates;
-            for (const part of coords) {
+            const parts = f.geometry?.type === 'MultiLineString'
+              ? f.geometry.coordinates
+              : f.geometry?.type === 'LineString'
+                ? [f.geometry.coordinates]
+                : [];
+            for (const part of parts) {
               for (const [lng, lat] of part) bounds.extend([lng, lat]);
             }
           }
