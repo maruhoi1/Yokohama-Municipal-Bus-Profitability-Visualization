@@ -72,13 +72,25 @@ def build_route_to_shapes(
     routes_rows: List[Dict[str, str]],
     trips_rows: List[Dict[str, str]],
 ) -> Dict[str, List[str]]:
-    """Map jp_parent_route_id -> list of unique shape_ids for that parent route."""
+    """Map jp_parent_route_id -> list of unique shape_ids for that parent route.
+
+    To display one line per route (like a railway map), only shapes from the
+    first route_id encountered for each parent route are used.  This avoids
+    drawing both the up-bound and down-bound lines for the same route.
+    """
     # route_id -> jp_parent_route_id
     route_to_parent: Dict[str, str] = {}
     for row in routes_rows:
         route_to_parent[row["route_id"]] = row["jp_parent_route_id"]
 
-    # jp_parent_route_id -> set of shape_ids
+    # Pick the first route_id per parent route so we only get one direction.
+    parent_first_route: Dict[str, str] = {}
+    for row in routes_rows:
+        pid = row["jp_parent_route_id"]
+        if pid not in parent_first_route:
+            parent_first_route[pid] = row["route_id"]
+
+    # jp_parent_route_id -> set of shape_ids (from the first route_id only)
     parent_shapes: Dict[str, set] = defaultdict(set)
     for row in trips_rows:
         route_id = row["route_id"]
@@ -86,7 +98,7 @@ def build_route_to_shapes(
         if not shape_id:
             continue
         parent_id = route_to_parent.get(route_id)
-        if parent_id:
+        if parent_id and route_id == parent_first_route.get(parent_id):
             parent_shapes[parent_id].add(shape_id)
 
     return {pid: sorted(sids) for pid, sids in parent_shapes.items()}

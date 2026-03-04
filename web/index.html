@@ -52,6 +52,32 @@
         padding: 4px 6px;
         background: #fff;
       }
+      .data-attribution {
+        position: absolute;
+        z-index: 1;
+        bottom: 28px;
+        left: 0;
+        right: 0;
+        text-align: center;
+        pointer-events: none;
+      }
+      .data-attribution-inner {
+        display: inline-block;
+        background: rgba(255, 255, 255, 0.85);
+        border-radius: 6px;
+        padding: 4px 10px;
+        font-size: 10px;
+        color: #6b7280;
+        line-height: 1.5;
+        pointer-events: auto;
+      }
+      .data-attribution-inner a {
+        color: #2563eb;
+        text-decoration: none;
+      }
+      .data-attribution-inner a:hover {
+        text-decoration: underline;
+      }
     </style>
   </head>
   <body>
@@ -71,6 +97,14 @@
       <div class="legend-row"><span class="swatch" style="background:#6b7280"></span>未マッチ</div>
     </div>
     <div id="map"></div>
+    <div class="data-attribution">
+      <div class="data-attribution-inner">
+        公共交通データ: <a href="https://www.odpt.org/" target="_blank" rel="noopener">公共交通オープンデータセンター</a>提供。
+        公共交通事業者により提供されたデータを元にしていますが、必ずしも正確・完全なものとは限りません。
+        本サイトの表示内容について公共交通事業者への直接の問合せはご遠慮ください。
+        お問い合わせは<a href="https://github.com/maruhoi1/Yokohama-Municipal-Bus-Profitability-Visualization/issues" target="_blank" rel="noopener">GitHub Issues</a>へ。
+      </div>
+    </div>
 
     <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
     <script>
