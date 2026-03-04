@@ -38,7 +38,6 @@
         height: 4px;
         border-radius: 999px;
       }
-      .popup-body { font-size: 12px; line-height: 1.6; }
       .basemap-switcher {
         margin-top: 8px;
         font-size: 12px;
@@ -131,16 +130,6 @@
         });
       }
 
-      function normalizeLineCoordinates(coords) {
-        const rounded = coords.map(([lng, lat]) => [
-          Number(lng).toFixed(6),
-          Number(lat).toFixed(6),
-        ]);
-        const forward = rounded.map((p) => p.join(',')).join('|');
-        const reversed = [...rounded].reverse().map((p) => p.join(',')).join('|');
-        return forward < reversed ? forward : reversed;
-      }
-
       function normalizeSegmentCoordinates(a, b) {
         const start = [Number(a[0]).toFixed(6), Number(a[1]).toFixed(6)].join(',');
         const end = [Number(b[0]).toFixed(6), Number(b[1]).toFixed(6)].join(',');
@@ -210,6 +199,16 @@
 
           map.addSource('routes', { type: 'geojson', data: parallelizedGeojson });
 
+          const offsetExpr = [
+            '*',
+            6,
+            [
+              '-',
+              ['get', 'overlap_index'],
+              ['/', ['-', ['get', 'overlap_count'], 1], 2],
+            ],
+          ];
+
           map.addLayer({
             id: 'route-lines-casing',
             type: 'line',
@@ -220,16 +219,8 @@
             },
             paint: {
               'line-color': '#ffffff',
-              'line-width': 5.5,
-              'line-offset': [
-                '*',
-                3,
-                [
-                  '-',
-                  ['get', 'overlap_index'],
-                  ['/', ['-', ['get', 'overlap_count'], 1], 2],
-                ],
-              ],
+              'line-width': 4.5,
+              'line-offset': offsetExpr,
               'line-opacity': 0.95,
             },
           });
@@ -250,42 +241,9 @@
                 '赤字', '#e11d48',
                 '#6b7280',
               ],
-              'line-width': 3.5,
-              'line-offset': [
-                '*',
-                3,
-                [
-                  '-',
-                  ['get', 'overlap_index'],
-                  ['/', ['-', ['get', 'overlap_count'], 1], 2],
-                ],
-              ],
+              'line-width': 3,
+              'line-offset': offsetExpr,
               'line-opacity': 0.9,
-            },
-          });
-
-          map.addLayer({
-            id: 'route-lines-hover',
-            type: 'line',
-            source: 'routes',
-            layout: {
-              'line-cap': 'round',
-              'line-join': 'round',
-            },
-            filter: ['==', ['get', 'route_key'], ''],
-            paint: {
-              'line-color': '#f59e0b',
-              'line-width': 7,
-              'line-offset': [
-                '*',
-                3,
-                [
-                  '-',
-                  ['get', 'overlap_index'],
-                  ['/', ['-', ['get', 'overlap_count'], 1], 2],
-                ],
-              ],
-              'line-opacity': 1,
             },
           });
 
@@ -300,68 +258,6 @@
             map.fitBounds(bounds, { padding: 28, duration: 0 });
           }
 
-          const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 14 });
-          let hoveredRouteKey = '';
-
-          function updateHoveredRoute(routeKey) {
-            if (hoveredRouteKey === routeKey) return;
-            hoveredRouteKey = routeKey;
-            map.setFilter('route-lines-hover', ['==', ['get', 'route_key'], hoveredRouteKey]);
-          }
-
-          let rafId = null;
-          let pendingEvent = null;
-
-          function clearHoverState() {
-            updateHoveredRoute('');
-            map.getCanvas().style.cursor = '';
-            popup.remove();
-          }
-
-          function processPointerMove() {
-            rafId = null;
-            const e = pendingEvent;
-            if (!e) return;
-
-            const feature = map.queryRenderedFeatures(e.point, { layers: ['route-lines'] })[0];
-            if (!feature) {
-              clearHoverState();
-              return;
-            }
-
-            map.getCanvas().style.cursor = 'pointer';
-            const p = feature.properties || {};
-            const profitValue = p.profit == null ? '' : ` (${Number(p.profit).toLocaleString()} 千円)`;
-            updateHoveredRoute(String(p.route_key || ''));
-
-            popup
-              .setLngLat(e.lngLat)
-              .setHTML(`
-                <div class="popup-body">
-                  <strong>系統: ${p.system_name || '-'} </strong><br/>
-                  収支: ${p.profit_status || '不明'}${profitValue}<br/>
-                  ${p.route_id ? `CSV系統ID: ${p.route_id}<br/>` : ''}
-                  ${p.from_stop ? `${p.from_stop} → ${p.to_stop}<br/>` : ''}
-                  ${p.daily_passengers ? `日平均乗客数: ${Number(p.daily_passengers).toLocaleString()} 人` : ''}
-                </div>
-              `)
-              .addTo(map);
-          }
-
-          map.on('mousemove', (e) => {
-            pendingEvent = e;
-            if (rafId !== null) return;
-            rafId = requestAnimationFrame(processPointerMove);
-          });
-
-          map.on('mouseleave', () => {
-            pendingEvent = null;
-            if (rafId !== null) {
-              cancelAnimationFrame(rafId);
-              rafId = null;
-            }
-            clearHoverState();
-          });
         } catch (err) {
           console.error(err);
           alert('GeoJSONの読み込みに失敗しました。scripts/build_geojson.py を先に実行してください。');
