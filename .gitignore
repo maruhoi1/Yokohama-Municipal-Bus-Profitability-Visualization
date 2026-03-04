@@ -1,0 +1,8 @@
+# GTFS-JP data files (redistribution prohibited by ODPT license)
+data/raw/routes.txt
+data/raw/routes_jp.txt
+data/raw/trips.txt
+data/raw/shapes.txt
+
+# National Land Numerical Information Shapefiles
+data/raw/N07-11_14.*
