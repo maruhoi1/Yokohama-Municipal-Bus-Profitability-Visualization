@@ -45,6 +45,19 @@ python -m http.server 8000
 4. GitHub の **Settings > Pages** で Source を **GitHub Actions** に設定。
 5. Actions の `Deploy static map to GitHub Pages` が成功すると公開 URL が発行されます。
 
+## データの出典・ライセンス
+
+### GTFS-JP データ（路線形状）
+
+本アプリケーションが利用する公共交通データは、[公共交通オープンデータセンター](https://www.odpt.org/)において提供されるものです。公共交通事業者により提供されたデータを元にしていますが、必ずしも正確・完全なものとは限りません。本アプリケーションの表示内容について、公共交通事業者への直接の問合せは行わないでください。
+
+- ライセンス: [公共交通オープンデータ基本ライセンス](https://developer.odpt.org/terms/data_terms.html)
+- ガイドライン: [公共交通オープンデータ開発者ガイドライン](https://developer.odpt.org/terms/developer_guidelines.html)
+
+### 収支データ
+
+横浜市交通局が公表している路線別収支データ（2024年度）を利用しています。
+
 ## 今後の改善案
 
 1. 未マッチ系統の解消（一部の路線は GTFS データとの対応が取れていない）。
