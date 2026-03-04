@@ -1,21 +1,32 @@
-# 横浜市営バス収支ビジュアライゼーション（MapLibre GL JS）
+# 横浜市営バス収支ビジュアライゼーション
 
-国土数値情報のバスルート Shapefile（`N07-11_14.*`）と、収支データ（`2024.csv`）を突合して、地図上で黒字/赤字を色分け表示するサンプルです。フロントエンドは **MapLibre GL JS** を使っています。
+横浜市営バスの路線別収支データ（`2024.csv`）と GTFS-JP データ（`routes.txt`, `trips.txt`, `shapes.txt`）を突合し、地図上で黒字／赤字を色分け表示する Web アプリケーションです。フロントエンドには **MapLibre GL JS** を使用しています。
 
-## 結論（調査結果）
+## データソース
 
-- `N07-11_14.shp/.dbf/.shx` は、`N07_003`（バス系統）と線形ジオメトリを持っており、地図描画に利用可能です。
-- このリポジトリの `2024.csv` と突合して `GeoJSON` を生成できることを確認しました。
-- 単純な数値系統ID（例: `7`, `106`）は多くが自動マッチ可能です。
-- 一方で、`A（中区・磯子区）` などの文字系統名や循環系統は、別途対応表を作ると精度が上がります。
+| ファイル | 概要 |
+|---|---|
+| `data/raw/routes.txt` | GTFS 路線定義（`route_id` ↔ `jp_parent_route_id` の対応） |
+| `data/raw/routes_jp.txt` | 路線の日本語名・起終点情報 |
+| `data/raw/trips.txt` | 便（トリップ）データ（`route_id` → `shape_id` の紐付け） |
+| `data/raw/shapes.txt` | 路線の地理座標（描画用ポリライン） |
+| `data/raw/2024.csv` | 2024年度の路線別収支データ（収入・費用・損益・営業係数・1日あたり乗客数） |
 
-## 生成手順
+## 仕組み
+
+1. **ビルドスクリプト** (`scripts/build_geojson_gtfs.py`) が GTFS データと収支 CSV を突合し、`web/data/routes_2024.geojson` を生成します。
+2. 各路線は `jp_parent_route_id`（親路線ID）で集約されます。上り・下りなど複数の `route_id` が同じ親路線に属する場合でも、**代表の 1 方向のみの形状を採用**し、電車の路線図のように 1 系統＝1 本の線で表示します。
+3. 数値系統名（例: `1` → `001`）は自動マッチされます。特殊名称の路線（例: `ベイサイドブルー` → `200`）はスクリプト内の対応表で手動マッピングしています。
+
+## GeoJSON 生成手順
 
 ```bash
-python scripts/build_geojson.py
+python scripts/build_geojson_gtfs.py
 ```
 
 実行後に `web/data/routes_2024.geojson` が生成されます。
+
+> **注**: レガシーの Shapefile ベースのビルドスクリプト (`scripts/build_geojson.py`) も残っていますが、現在は GTFS 版を使用してください。
 
 ## ローカル表示
 
@@ -24,19 +35,18 @@ python -m http.server 8000
 # ブラウザで http://localhost:8000/web/index.html を開く
 ```
 
-## GitHub Pages で公開する（無料）
+## GitHub Pages で公開する
 
-このリポジトリには `web/` をそのまま GitHub Pages にデプロイするワークフローを追加しています。
+このリポジトリには `web/` を GitHub Pages にデプロイするワークフロー (`.github/workflows/deploy-pages.yml`) が含まれています。
 
-1. GitHub リポジトリのデフォルトブランチを `main` にする（ワークフローは `main` push で起動）。
-2. `python scripts/build_geojson.py` を実行して `web/data/routes_2024.geojson` を更新。
+1. デフォルトブランチを `main` にする（ワークフローは `main` push で起動）。
+2. `python scripts/build_geojson_gtfs.py` を実行して `web/data/routes_2024.geojson` を更新。
 3. 変更を `main` に push。
 4. GitHub の **Settings > Pages** で Source を **GitHub Actions** に設定。
-5. Actions の `Deploy static map to GitHub Pages` が成功すると公開URLが発行されます。
+5. Actions の `Deploy static map to GitHub Pages` が成功すると公開 URL が発行されます。
 
 ## 今後の改善案
 
-1. `N07_003` と `route_id` の対応表（CSV）を作り、未マッチ系統を解消。
-2. 路線重複の統合（同一路線の上下便・区間便の取り扱い）ルールを整理。
-3. 年度切り替えUIを追加し、複数年度を比較。
-4. GitHub Actions で `GeoJSON` 自動更新。
+1. 未マッチ系統の解消（一部の路線は GTFS データとの対応が取れていない）。
+2. 年度切り替え UI を追加し、複数年度を比較。
+3. GitHub Actions で GeoJSON 自動生成。
