@@ -220,10 +220,10 @@
             },
             paint: {
               'line-color': '#ffffff',
-              'line-width': 5.5,
+              'line-width': 5,
               'line-offset': [
                 '*',
-                3,
+                6,
                 [
                   '-',
                   ['get', 'overlap_index'],
@@ -250,10 +250,10 @@
                 '赤字', '#e11d48',
                 '#6b7280',
               ],
-              'line-width': 3.5,
+              'line-width': 3,
               'line-offset': [
                 '*',
-                3,
+                6,
                 [
                   '-',
                   ['get', 'overlap_index'],
@@ -264,30 +264,6 @@
             },
           });
 
-          map.addLayer({
-            id: 'route-lines-hover',
-            type: 'line',
-            source: 'routes',
-            layout: {
-              'line-cap': 'round',
-              'line-join': 'round',
-            },
-            filter: ['==', ['get', 'route_key'], ''],
-            paint: {
-              'line-color': '#f59e0b',
-              'line-width': 7,
-              'line-offset': [
-                '*',
-                3,
-                [
-                  '-',
-                  ['get', 'overlap_index'],
-                  ['/', ['-', ['get', 'overlap_count'], 1], 2],
-                ],
-              ],
-              'line-opacity': 1,
-            },
-          });
 
           const bounds = new maplibregl.LngLatBounds();
           for (const f of geojson.features) {
@@ -300,40 +276,16 @@
             map.fitBounds(bounds, { padding: 28, duration: 0 });
           }
 
-          const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 14 });
-          let hoveredRouteKey = '';
+          const popup = new maplibregl.Popup({ closeButton: true, closeOnClick: true, offset: 14 });
 
-          function updateHoveredRoute(routeKey) {
-            if (hoveredRouteKey === routeKey) return;
-            hoveredRouteKey = routeKey;
-            map.setFilter('route-lines-hover', ['==', ['get', 'route_key'], hoveredRouteKey]);
-          }
-
-          let rafId = null;
-          let pendingEvent = null;
-
-          function clearHoverState() {
-            updateHoveredRoute('');
-            map.getCanvas().style.cursor = '';
-            popup.remove();
-          }
-
-          function processPointerMove() {
-            rafId = null;
-            const e = pendingEvent;
-            if (!e) return;
-
+          map.on('click', (e) => {
             const feature = map.queryRenderedFeatures(e.point, { layers: ['route-lines'] })[0];
             if (!feature) {
-              clearHoverState();
+              popup.remove();
               return;
             }
-
-            map.getCanvas().style.cursor = 'pointer';
             const p = feature.properties || {};
             const profitValue = p.profit == null ? '' : ` (${Number(p.profit).toLocaleString()} 千円)`;
-            updateHoveredRoute(String(p.route_key || ''));
-
             popup
               .setLngLat(e.lngLat)
               .setHTML(`
@@ -346,21 +298,6 @@
                 </div>
               `)
               .addTo(map);
-          }
-
-          map.on('mousemove', (e) => {
-            pendingEvent = e;
-            if (rafId !== null) return;
-            rafId = requestAnimationFrame(processPointerMove);
-          });
-
-          map.on('mouseleave', () => {
-            pendingEvent = null;
-            if (rafId !== null) {
-              cancelAnimationFrame(rafId);
-              rafId = null;
-            }
-            clearHoverState();
           });
         } catch (err) {
           console.error(err);
